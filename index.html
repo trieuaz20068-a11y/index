@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ace 9x Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-100 font-sans">
+
+<div id="app"></div>
+
+<script>
+// ===== DATA =====
+let user = null
+let members = JSON.parse(localStorage.getItem('members')) || []
+if(Array.isArray(members) && members.some(m => typeof m === 'string')){
+  members = members.map(name => ({name, zalo:'', ingame:'', gameId:'', birthYear:''}))
+}
+
+let flowersTotal = 254
+let flowersOwned = JSON.parse(localStorage.getItem('flowersOwned')) || 0
+
+// ===== LOGIN =====
+function renderLogin(){
+  app.innerHTML = `
+  <div class="flex items-center justify-center h-screen">
+    <div class="bg-white p-8 rounded-2xl shadow w-80">
+      <h2 class="text-xl font-bold mb-4">Đăng nhập hệ thống</h2>
+      <input id="u" placeholder="Username" class="w-full border p-2 mb-2 rounded"/>
+      <input id="p" type="password" placeholder="Password" class="w-full border p-2 mb-4 rounded"/>
+      <button onclick="login()" class="w-full bg-black text-white py-2 rounded">Đăng nhập</button>
+    </div>
+  </div>`
+}
+
+function login(){
+  if(u.value === 'admin' && p.value === '123'){
+    user = {role:'admin'}
+    renderApp()
+  } else alert("Sai tài khoản")
+}
+
+// ===== APP =====
+let tab = 'dashboard'
+let topMembers = JSON.parse(localStorage.getItem('topMembers')) || ['KenLy','Min','Trúc']
+let showMemberModal = false
+let showTopModal = false
+let showFlowerModal = false
+let editingMemberIndex = -1
+
+function renderApp(){
+  app.innerHTML = `
+  <div class="max-w-6xl mx-auto p-6">
+
+    <!-- HEADER -->
+    <div class="bg-white rounded-2xl p-6 shadow mb-6">
+      <p class="text-gray-400 text-sm">ACE 9X DASHBOARD</p>
+      <h1 class="text-3xl font-bold">Quản lý hội Ace 9x</h1>
+      <button onclick="logout()" class="text-red-500 text-sm mt-2">Đăng xuất</button>
+
+      <div class="flex gap-2 mt-4 flex-wrap">
+        ${topMembers.map((name,i)=>`
+          <span class="bg-yellow-100 px-3 py-1 rounded-full text-sm">Top ${i+1}: ${name}</span>
+        `).join('')}
+      </div>
+      <button onclick="openTopModal()" class="mt-4 bg-yellow-500 text-black px-4 py-2 rounded hover:bg-yellow-600">Cập nhật top</button>
+    </div>
+
+    <!-- STATS -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div class="bg-white p-4 rounded-xl shadow">
+        <p class="text-gray-500">Thành viên</p>
+        <h2 class="text-2xl font-bold">${members.length}</h2>
+      </div>
+      <div class="bg-white p-4 rounded-xl shadow">
+        <p class="text-gray-500">Tổng hoa</p>
+        <h2 class="text-2xl font-bold">${flowersTotal}</h2>
+      </div>
+      <div class="bg-white p-4 rounded-xl shadow">
+        <p class="text-gray-500">Đã có</p>
+        <h2 class="text-2xl font-bold">${flowersOwned}</h2>
+      </div>
+      <div class="bg-white p-4 rounded-xl shadow">
+        <p class="text-gray-500">Còn thiếu</p>
+        <h2 class="text-2xl font-bold">${flowersTotal - flowersOwned}</h2>
+      </div>
+    </div>
+
+    <!-- TABS -->
+    <div class="bg-white rounded-xl p-3 shadow flex gap-2 flex-wrap mb-6">
+      ${tabBtn('dashboard','Tổng quan')}
+      ${tabBtn('members','Thành viên')}
+      ${tabBtn('flowers','Tra cứu hoa')}
+      ${tabBtn('search','Tra cứu thành viên')}
+      ${tabBtn('history','Lịch sử')}
+    </div>
+
+    <div id="content"></div>
+
+    <!-- MODAL THÊMCHIẾT TẠO THÀNH VIÊN -->
+    ${showMemberModal ? `
+    <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+      <div class="bg-white p-6 rounded-xl shadow-lg w-96">
+        <h3 class="font-bold mb-4 text-lg">${editingMemberIndex >= 0 ? 'Sửa thành viên' : 'Thêm thành viên mới'}</h3>
+        
+        <div id="modalMessage" class="mb-4"></div>
+        
+        <input id="memberName" placeholder="Tên thành viên" class="w-full border p-2 mb-3 rounded"/>
+        <input id="memberZalo" placeholder="Tên Zalo" class="w-full border p-2 mb-3 rounded"/>
+        <input id="memberIngame" placeholder="Tên ingame" class="w-full border p-2 mb-3 rounded"/>
+        <input id="memberGameId" placeholder="ID Game" class="w-full border p-2 mb-3 rounded"/>
+        <input id="memberBirthYear" type="number" placeholder="Năm sinh" min="1900" max="2100" class="w-full border p-2 mb-4 rounded"/>
+        
+        <div class="flex gap-2">
+          <button onclick="saveMember()" class="flex-1 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">Lưu</button>
+          <button onclick="closeMemberModal()" class="flex-1 bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600">Hủy</button>
+        </div>
+      </div>
+    </div>
+    ` : ''}
+
+    ${showTopModal ? `
+    <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+      <div class="bg-white p-6 rounded-xl shadow-lg w-96">
+        <h3 class="font-bold mb-4 text-lg">Cập nhật thành viên Top</h3>
+        
+        <div id="topModalMessage" class="mb-4"></div>
+        
+        <input id="top1" placeholder="Top 1" class="w-full border p-2 mb-3 rounded" value="${topMembers[0]}"/>
+        <input id="top2" placeholder="Top 2" class="w-full border p-2 mb-3 rounded" value="${topMembers[1]}"/>
+        <input id="top3" placeholder="Top 3" class="w-full border p-2 mb-4 rounded" value="${topMembers[2]}"/>
+        
+        <div class="flex gap-2">
+          <button onclick="saveTopMembers()" class="flex-1 bg-yellow-500 text-black px-4 py-2 rounded hover:bg-yellow-600">Lưu</button>
+          <button onclick="closeTopModal()" class="flex-1 bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600">Hủy</button>
+        </div>
+      </div>
+    </div>
+    ` : ''}
+
+    ${showFlowerModal ? `
+    <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+      <div class="bg-white p-6 rounded-xl shadow-lg w-96">
+        <h3 class="font-bold mb-4 text-lg">Cập nhật số hoa đã có</h3>
+        
+        <div id="flowerModalMessage" class="mb-4"></div>
+        
+        <div class="mb-4">
+          <label class="block text-sm font-medium text-gray-700 mb-2">Số hoa hiện tại: ${flowersOwned}/${flowersTotal}</label>
+          <input id="newFlowersOwned" type="number" placeholder="Nhập số hoa mới" min="0" max="${flowersTotal}" class="w-full border p-2 rounded" value="${flowersOwned}"/>
+        </div>
+        
+        <div class="flex gap-2">
+          <button onclick="saveFlowersOwned()" class="flex-1 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">Lưu</button>
+          <button onclick="closeFlowerModal()" class="flex-1 bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600">Hủy</button>
+        </div>
+      </div>
+    </div>
+    ` : ''}
+
+  </div>
+  `
+  renderContent()
+}
+
+function tabBtn(key,label){
+  return `<button onclick="setTab('${key}')" 
+    class="px-4 py-2 rounded-full ${tab===key?'bg-black text-white':'bg-gray-200'}">
+    ${label}
+  </button>`
+}
+
+function setTab(t){
+  tab = t
+  renderApp()
+}
+
+// ===== DASHBOARD =====
+function dashboard(){
+  let percent = Math.round((flowersOwned/flowersTotal)*100)
+
+  return `
+  <div class="bg-white p-6 rounded-xl shadow">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="font-bold">Tiến độ sưu tập</h3>
+      <button onclick="openFlowerModal()" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">Cập nhật hoa</button>
+    </div>
+
+    <div class="w-full bg-gray-200 rounded-full h-4">
+      <div class="bg-green-500 h-4 rounded-full" style="width:${percent}%"></div>
+    </div>
+
+    <p class="text-sm mt-2 text-gray-500">
+      ${flowersOwned}/${flowersTotal} (${percent}%)
+    </p>
+  </div>
+  `
+}
+
+// ===== MEMBERS =====
+function memberUI(){
+  return `
+  <div class="bg-white p-6 rounded-xl shadow">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="font-bold text-lg">Danh sách thành viên (${members.length})</h3>
+      <button onclick="openMemberModal()" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">+ Thêm thành viên</button>
+    </div>
+
+    <div id="message" class="mb-4"></div>
+
+    ${members.length === 0 ? '<p class="text-gray-400 text-center py-6">Chưa có thành viên</p>' : `
+    <div class="space-y-3">
+      ${members.map((m,i)=>`
+        <div class="p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border border-blue-200 hover:shadow-md transition">
+          <div class="flex justify-between items-start">
+            <div class="flex-1">
+              <div class="font-bold text-lg text-blue-700">${i+1}. ${m.name}</div>
+              <div class="text-sm text-gray-600 mt-2 grid grid-cols-2 gap-2">
+                <div><span class="font-semibold">Zalo:</span> ${m.zalo || '-'}</div>
+                <div><span class="font-semibold">Ingame:</span> ${m.ingame || '-'}</div>
+                <div><span class="font-semibold">ID Game:</span> ${m.gameId || '-'}</div>
+                <div><span class="font-semibold">Năm sinh:</span> ${m.birthYear || '-'}</div>
+              </div>
+            </div>
+            <div class="flex gap-1">
+              <button onclick="editMember(${i})" class="text-blue-500 hover:bg-blue-100 px-3 py-1 rounded text-sm">Sửa</button>
+              <button onclick="del(${i})" class="text-red-500 hover:bg-red-100 px-3 py-1 rounded text-sm">Xóa</button>
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+    `}
+  </div>
+  `
+}
+
+// ===== FLOWERS =====
+function flowersUI(){
+  return `
+  <div class="bg-white p-6 rounded-xl shadow">
+    <h3 class="font-bold mb-4">Danh sách hoa (demo)</h3>
+    <p>Chức năng nâng cao có thể thêm sau</p>
+  </div>
+  `
+}
+
+// ===== SEARCH =====
+function searchUI(){
+  return `
+  <div class="bg-white p-6 rounded-xl shadow">
+    <input id="search" oninput="doSearch()" placeholder="Tìm thành viên..." class="border p-2 w-full mb-4"/>
+    <div id="result"></div>
+  </div>
+  `
+}
+
+function doSearch(){
+  let k = search.value.toLowerCase()
+  result.innerHTML = members
+    .filter(m=>m.name.toLowerCase().includes(k))
+    .map((m,i)=>`
+    <div class="p-4 bg-blue-50 rounded-lg border border-blue-200 mb-2">
+      <div class="font-bold text-blue-700">${m.name}</div>
+      <div class="text-sm text-gray-600 mt-2">
+        <div><span class="font-semibold">Zalo:</span> ${m.zalo || '-'}</div>
+        <div><span class="font-semibold">Ingame:</span> ${m.ingame || '-'}</div>
+        <div><span class="font-semibold">ID Game:</span> ${m.gameId || '-'}</div>
+        <div><span class="font-semibold">Năm sinh:</span> ${m.birthYear || '-'}</div>
+      </div>
+    </div>
+    `).join('')
+}
+
+// ===== HISTORY =====
+let logs = JSON.parse(localStorage.getItem('logs')) || []
+
+function historyUI(){
+  return `
+  <div class="bg-white p-6 rounded-xl shadow">
+    <h3 class="font-bold mb-4">Lịch sử</h3>
+    ${logs.map(l=>`<div class="text-sm">${l}</div>`).join('')}
+  </div>
+  `
+}
+
+// ===== ACTION =====
+function openMemberModal(){
+  editingMemberIndex = -1
+  showMemberModal = true
+  renderApp()
+  setTimeout(()=>{
+    document.getElementById('memberName')?.focus()
+  }, 100)
+}
+
+function editMember(index){
+  editingMemberIndex = index
+  showMemberModal = true
+  renderApp()
+  setTimeout(()=>{
+    let m = members[index]
+    document.getElementById('memberName').value = m.name
+    document.getElementById('memberZalo').value = m.zalo || ''
+    document.getElementById('memberIngame').value = m.ingame || ''
+    document.getElementById('memberGameId').value = m.gameId || ''
+    document.getElementById('memberBirthYear').value = m.birthYear || ''
+  }, 100)
+}
+
+function closeMemberModal(){
+  showMemberModal = false
+  editingMemberIndex = -1
+  renderApp()
+}
+
+function saveMember(){
+  let name = document.getElementById('memberName').value.trim()
+  let zalo = document.getElementById('memberZalo').value.trim()
+  let ingame = document.getElementById('memberIngame').value.trim()
+  let gameId = document.getElementById('memberGameId').value.trim()
+  let birthYear = document.getElementById('memberBirthYear').value.trim()
+  let modalMessage = document.getElementById('modalMessage')
+  
+  if(!name) {
+    showModalMessage('Vui lòng nhập tên thành viên', 'error')
+    return
+  }
+  
+  let isDuplicate = members.some((m,i) => m.name.toLowerCase() === name.toLowerCase() && i !== editingMemberIndex)
+  if(isDuplicate) {
+    showModalMessage('Thành viên này đã tồn tại', 'error')
+    return
+  }
+  
+  let memberObj = {name, zalo, ingame, gameId, birthYear}
+  
+  if(editingMemberIndex >= 0) {
+    let oldName = members[editingMemberIndex].name
+    members[editingMemberIndex] = memberObj
+    logs.push(`Sửa: ${oldName} → ${name}`)
+  } else {
+    members.push(memberObj)
+    logs.push("Thêm: " + name)
+  }
+  
+  save()
+  showModalMessage('Lưu thành công!', 'success')
+  setTimeout(()=>{
+    closeMemberModal()
+  }, 1000)
+}
+
+function showModalMessage(text, type){
+  let modalMessage = document.getElementById('modalMessage')
+  if(!modalMessage) return
+  
+  modalMessage.innerHTML = `<div class="p-3 rounded ${type==='success'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'} text-sm">${text}</div>`
+  
+  if(type === 'error') {
+    setTimeout(()=>{
+      if(modalMessage) modalMessage.innerHTML = ''
+    }, 3000)
+  }
+}
+
+function showMessage(text, type){
+  let messageDiv = document.getElementById('message')
+  if(!messageDiv) return
+  
+  messageDiv.innerHTML = `<div class="p-3 rounded ${type==='success'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}">${text}</div>`
+  
+  setTimeout(()=>{
+    if(messageDiv) messageDiv.innerHTML = ''
+  }, 3000)
+}
+
+function del(i){
+  if(!confirm(`Xác nhận xóa thành viên: ${members[i].name}?`)) return
+  logs.push("Xóa: "+members[i].name)
+  members.splice(i,1)
+  save()
+}
+
+function openTopModal(){
+  showTopModal = true
+  showMemberModal = false
+  renderApp()
+  setTimeout(()=>{
+    document.getElementById('top1')?.focus()
+  }, 100)
+}
+
+function closeTopModal(){
+  showTopModal = false
+  renderApp()
+}
+
+function saveTopMembers(){
+  let top1 = document.getElementById('top1').value.trim() || 'Top 1'
+  let top2 = document.getElementById('top2').value.trim() || 'Top 2'
+  let top3 = document.getElementById('top3').value.trim() || 'Top 3'
+  let msg = document.getElementById('topModalMessage')
+
+  if(!top1 || !top2 || !top3) {
+    if(msg) msg.innerHTML = '<div class="p-3 rounded bg-red-100 text-red-700 text-sm">Vui lòng điền đủ 3 thành viên top</div>'
+    return
+  }
+
+  topMembers = [top1, top2, top3]
+  logs.push(`Cập nhật top hội: ${top1}, ${top2}, ${top3}`)
+  save()
+  if(msg) msg.innerHTML = '<div class="p-3 rounded bg-green-100 text-green-700 text-sm">Lưu top thành công!</div>'
+  setTimeout(()=>{
+    closeTopModal()
+  }, 900)
+}
+
+function openFlowerModal(){
+  showFlowerModal = true
+  showMemberModal = false
+  showTopModal = false
+  renderApp()
+  setTimeout(()=>{
+    document.getElementById('newFlowersOwned')?.focus()
+  }, 100)
+}
+
+function closeFlowerModal(){
+  showFlowerModal = false
+  renderApp()
+}
+
+function saveFlowersOwned(){
+  let newValue = parseInt(document.getElementById('newFlowersOwned').value) || 0
+  let msg = document.getElementById('flowerModalMessage')
+  
+  if(newValue < 0 || newValue > flowersTotal) {
+    if(msg) msg.innerHTML = '<div class="p-3 rounded bg-red-100 text-red-700 text-sm">Số hoa phải từ 0 đến ' + flowersTotal + '</div>'
+    return
+  }
+  
+  let oldValue = flowersOwned
+  flowersOwned = newValue
+  logs.push(`Cập nhật hoa: ${oldValue} → ${newValue}`)
+  save()
+  if(msg) msg.innerHTML = '<div class="p-3 rounded bg-green-100 text-green-700 text-sm">Cập nhật thành công!</div>'
+  setTimeout(()=>{
+    closeFlowerModal()
+  }, 900)
+}
+
+
+function save(){
+  localStorage.setItem('members', JSON.stringify(members))
+  localStorage.setItem('logs', JSON.stringify(logs))
+  localStorage.setItem('topMembers', JSON.stringify(topMembers))
+  localStorage.setItem('flowersOwned', JSON.stringify(flowersOwned))
+  renderApp()
+}
+
+// ===== RENDER =====
+function renderContent(){
+  if(tab==='dashboard') content.innerHTML = dashboard()
+  if(tab==='members') content.innerHTML = memberUI()
+  if(tab==='flowers') content.innerHTML = flowersUI()
+  if(tab==='search') content.innerHTML = searchUI()
+  if(tab==='history') content.innerHTML = historyUI()
+}
+
+function logout(){
+  user = null
+  renderLogin()
+}
+
+// START
+renderLogin()
+</script>
+
+</body>
+</html>
