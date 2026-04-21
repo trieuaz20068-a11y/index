@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ace 9x Dashboard</title>
 <script src="https://cdn.tailwindcss.com"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 </head>
 
 <body class="bg-gray-100 font-sans">
@@ -13,41 +16,199 @@
 
 <script>
 // ===== DATA =====
-let user = null
-let members = JSON.parse(localStorage.getItem('members')) || []
-if(Array.isArray(members) && members.some(m => typeof m === 'string')){
-  members = members.map(name => ({name, zalo:'', ingame:'', gameId:'', birthYear:''}))
+// Cấu hình Firebase
+// Bước 1: Tạo project trong Firebase console https://console.firebase.google.com/
+// Bước 2: Bật Authentication > Sign-in method > Email/Password
+// Bước 3: Tạo Firestore database chế độ test hoặc production
+// Bước 4: Lấy config từ Project settings > Your apps > Firebase SDK
+// Bước 5: Dán các giá trị bên dưới vào các trường tương ứng
+// Nếu vẫn chưa thay giá trị, app sẽ dùng localStorage cục bộ.
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+
+const useFirebase = !firebaseConfig.apiKey.includes('YOUR_') && !firebaseConfig.projectId.includes('YOUR_')
+let auth = null
+let db = null
+
+if(useFirebase){
+  firebase.initializeApp(firebaseConfig);
+  auth = firebase.auth();
+  db = firebase.firestore();
+} else {
+  console.warn('Firebase chưa cấu hình. Ứng dụng sẽ dùng localStorage tạm thời.')
 }
 
+let user = null
+let members = JSON.parse(localStorage.getItem('members')) || []
 let flowersTotal = 254
 let flowersOwned = JSON.parse(localStorage.getItem('flowersOwned')) || 0
+let topMembers = JSON.parse(localStorage.getItem('topMembers')) || ['KenLy','Min','Trúc']
+let siteContent = JSON.parse(localStorage.getItem('siteContent')) || {
+  headerLabel: 'ACE 9X DASHBOARD',
+  headerTitle: 'Quản lý hội Ace 9x',
+  headerSubtitle: 'Bảng điều khiển quản lý hội',
+  flowerNote: 'Cập nhật hoa để theo dõi tiến độ sưu tập',
+  aboutText: 'Quản lý thành viên, top hội và tiến độ hoa bằng giao diện đơn giản.'
+}
+let logs = JSON.parse(localStorage.getItem('logs')) || []
 
 // ===== LOGIN =====
 function renderLogin(){
   app.innerHTML = `
   <div class="flex items-center justify-center h-screen">
-    <div class="bg-white p-8 rounded-2xl shadow w-80">
+    <div class="bg-white p-8 rounded-2xl shadow w-96">
       <h2 class="text-xl font-bold mb-4">Đăng nhập hệ thống</h2>
-      <input id="u" placeholder="Username" class="w-full border p-2 mb-2 rounded"/>
+      <input id="u" type="email" placeholder="Email" class="w-full border p-2 mb-2 rounded"/>
       <input id="p" type="password" placeholder="Password" class="w-full border p-2 mb-4 rounded"/>
-      <button onclick="login()" class="w-full bg-black text-white py-2 rounded">Đăng nhập</button>
+      <button onclick="login()" class="w-full bg-black text-white py-2 rounded mb-2">Đăng nhập</button>
+      <button onclick="createAccount()" class="w-full bg-gray-800 text-white py-2 rounded">Tạo tài khoản</button>
+      <p class="text-xs text-gray-500 mt-4">${useFirebase ? 'Dùng cùng tài khoản trên mọi trình duyệt để xem dữ liệu đã lưu.' : 'Firebase chưa cấu hình. Dữ liệu hiện lưu cục bộ trong trình duyệt này.'}</p>
     </div>
   </div>`
 }
 
-function login(){
-  if(u.value === 'admin' && p.value === '123'){
-    user = {role:'admin'}
-    renderApp()
-  } else alert("Sai tài khoản")
+async function login(){
+  try {
+    if(useFirebase){
+      const cred = await auth.signInWithEmailAndPassword(u.value.trim(), p.value.trim())
+      user = cred.user
+      await loadData()
+      renderApp()
+    } else {
+      const email = u.value.trim()
+      const pass = p.value.trim()
+      const localUsers = JSON.parse(localStorage.getItem('localUsers')) || {}
+      if(localUsers[email] === pass){
+        user = {uid: email, email}
+        loadLocalData()
+        renderApp()
+      } else {
+        alert('Sai email hoặc mật khẩu local.')
+      }
+    }
+  } catch(error){
+    alert(error.message)
+  }
+}
+
+async function createAccount(){
+  try {
+    if(useFirebase){
+      const cred = await auth.createUserWithEmailAndPassword(u.value.trim(), p.value.trim())
+      user = cred.user
+      await saveData()
+      renderApp()
+    } else {
+      const email = u.value.trim()
+      const pass = p.value.trim()
+      const localUsers = JSON.parse(localStorage.getItem('localUsers')) || {}
+      localUsers[email] = pass
+      localStorage.setItem('localUsers', JSON.stringify(localUsers))
+      user = {uid: email, email}
+      saveLocalData()
+      renderApp()
+    }
+  } catch(error){
+    alert(error.message)
+  }
+}
+
+if(useFirebase){
+  auth.onAuthStateChanged(async (currentUser) => {
+    user = currentUser
+    if(user){
+      await loadData()
+      renderApp()
+    } else {
+      renderLogin()
+    }
+  })
+} else {
+  renderLogin()
+}
+
+async function loadData(){
+  if(!useFirebase || !user){
+    loadLocalData()
+    return
+  }
+  try {
+    const doc = await db.collection('users').doc(user.uid).get()
+    if(doc.exists){
+      const data = doc.data()
+      members = Array.isArray(data.members) ? data.members : []
+      if(Array.isArray(members) && members.some(m => typeof m === 'string')){
+        members = members.map(name => ({name, zalo:'', ingame:'', gameId:'', birthYear:''}))
+      }
+      topMembers = Array.isArray(data.topMembers) ? data.topMembers : topMembers
+      flowersOwned = typeof data.flowersOwned === 'number' ? data.flowersOwned : 0
+      siteContent = data.siteContent || siteContent
+      logs = Array.isArray(data.logs) ? data.logs : []
+    } else {
+      await saveData()
+    }
+  } catch(error){
+    console.error('Firebase load error', error)
+    alert('Không thể tải dữ liệu từ server. Kiểm tra cấu hình Firebase.')
+    loadLocalData()
+  }
+  localStorage.setItem('siteContent', JSON.stringify(siteContent))
+  localStorage.setItem('members', JSON.stringify(members))
+  localStorage.setItem('topMembers', JSON.stringify(topMembers))
+  localStorage.setItem('flowersOwned', JSON.stringify(flowersOwned))
+  localStorage.setItem('logs', JSON.stringify(logs))
+}
+
+function loadLocalData(){
+  members = JSON.parse(localStorage.getItem('members')) || members
+  if(Array.isArray(members) && members.some(m => typeof m === 'string')){
+    members = members.map(name => ({name, zalo:'', ingame:'', gameId:'', birthYear:''}))
+  }
+  topMembers = JSON.parse(localStorage.getItem('topMembers')) || topMembers
+  flowersOwned = JSON.parse(localStorage.getItem('flowersOwned')) || flowersOwned
+  siteContent = JSON.parse(localStorage.getItem('siteContent')) || siteContent
+  logs = JSON.parse(localStorage.getItem('logs')) || logs
+}
+
+async function saveData(){
+  if(useFirebase && user){
+    try {
+      await db.collection('users').doc(user.uid).set({
+        members,
+        topMembers,
+        flowersOwned,
+        siteContent,
+        logs
+      }, {merge:true})
+    } catch(error){
+      console.error('Firebase save error', error)
+      alert('Lưu dữ liệu lên server thất bại.')
+    }
+  } else {
+    saveLocalData()
+  }
+}
+
+function saveLocalData(){
+  localStorage.setItem('members', JSON.stringify(members))
+  localStorage.setItem('topMembers', JSON.stringify(topMembers))
+  localStorage.setItem('flowersOwned', JSON.stringify(flowersOwned))
+  localStorage.setItem('siteContent', JSON.stringify(siteContent))
+  localStorage.setItem('logs', JSON.stringify(logs))
 }
 
 // ===== APP =====
 let tab = 'dashboard'
-let topMembers = JSON.parse(localStorage.getItem('topMembers')) || ['KenLy','Min','Trúc']
 let showMemberModal = false
 let showTopModal = false
 let showFlowerModal = false
+let showContentModal = false
 let editingMemberIndex = -1
 
 function renderApp(){
@@ -56,8 +217,9 @@ function renderApp(){
 
     <!-- HEADER -->
     <div class="bg-white rounded-2xl p-6 shadow mb-6">
-      <p class="text-gray-400 text-sm">ACE 9X DASHBOARD</p>
-      <h1 class="text-3xl font-bold">Quản lý hội Ace 9x</h1>
+      <p class="text-gray-400 text-sm">${siteContent.headerLabel}</p>
+      <h1 class="text-3xl font-bold">${siteContent.headerTitle}</h1>
+      <p class="text-gray-500 mt-1">${siteContent.headerSubtitle}</p>
       <button onclick="logout()" class="text-red-500 text-sm mt-2">Đăng xuất</button>
 
       <div class="flex gap-2 mt-4 flex-wrap">
@@ -65,7 +227,10 @@ function renderApp(){
           <span class="bg-yellow-100 px-3 py-1 rounded-full text-sm">Top ${i+1}: ${name}</span>
         `).join('')}
       </div>
-      <button onclick="openTopModal()" class="mt-4 bg-yellow-500 text-black px-4 py-2 rounded hover:bg-yellow-600">Cập nhật top</button>
+      <div class="flex flex-wrap gap-2 mt-4">
+        <button onclick="openTopModal()" class="bg-yellow-500 text-black px-4 py-2 rounded hover:bg-yellow-600">Cập nhật top</button>
+        <button onclick="openContentModal()" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">Cập nhật nội dung</button>
+      </div>
     </div>
 
     <!-- STATS -->
@@ -160,6 +325,23 @@ function renderApp(){
     </div>
     ` : ''}
 
+    ${showContentModal ? `
+    <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+      <div class="bg-white p-6 rounded-xl shadow-lg w-96">
+        <h3 class="font-bold mb-4 text-lg">Cập nhật nội dung trang</h3>
+        <div id="contentModalMessage" class="mb-4"></div>
+        <input id="contentHeaderLabel" placeholder="Nhãn header" class="w-full border p-2 mb-3 rounded" value="${siteContent.headerLabel}" />
+        <input id="contentHeaderTitle" placeholder="Tiêu đề" class="w-full border p-2 mb-3 rounded" value="${siteContent.headerTitle}" />
+        <input id="contentHeaderSubtitle" placeholder="Mô tả" class="w-full border p-2 mb-3 rounded" value="${siteContent.headerSubtitle}" />
+        <textarea id="contentFlowerNote" placeholder="Ghi chú hoa" class="w-full border p-2 mb-4 rounded" rows="3">${siteContent.flowerNote}</textarea>
+        <div class="flex gap-2">
+          <button onclick="saveSiteContent()" class="flex-1 bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">Lưu</button>
+          <button onclick="closeContentModal()" class="flex-1 bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600">Hủy</button>
+        </div>
+      </div>
+    </div>
+    ` : ''}
+
   </div>
   `
   renderContent()
@@ -195,6 +377,7 @@ function dashboard(){
     <p class="text-sm mt-2 text-gray-500">
       ${flowersOwned}/${flowersTotal} (${percent}%)
     </p>
+    <p class="text-sm mt-3 text-gray-500">${siteContent.flowerNote}</p>
   </div>
   `
 }
@@ -275,7 +458,6 @@ function doSearch(){
 }
 
 // ===== HISTORY =====
-let logs = JSON.parse(localStorage.getItem('logs')) || []
 
 function historyUI(){
   return `
@@ -418,6 +600,50 @@ function saveTopMembers(){
   }, 900)
 }
 
+function openContentModal(){
+  showContentModal = true
+  showMemberModal = false
+  showTopModal = false
+  showFlowerModal = false
+  renderApp()
+  setTimeout(()=>{
+    document.getElementById('contentHeaderLabel')?.focus()
+  }, 100)
+}
+
+function closeContentModal(){
+  showContentModal = false
+  renderApp()
+}
+
+function saveSiteContent(){
+  let headerLabel = document.getElementById('contentHeaderLabel').value.trim()
+  let headerTitle = document.getElementById('contentHeaderTitle').value.trim()
+  let headerSubtitle = document.getElementById('contentHeaderSubtitle').value.trim()
+  let flowerNote = document.getElementById('contentFlowerNote').value.trim()
+  let msg = document.getElementById('contentModalMessage')
+
+  if(!headerLabel || !headerTitle) {
+    if(msg) msg.innerHTML = '<div class="p-3 rounded bg-red-100 text-red-700 text-sm">Vui lòng nhập tiêu đề và nhãn header</div>'
+    return
+  }
+
+  siteContent = {
+    headerLabel,
+    headerTitle,
+    headerSubtitle,
+    flowerNote,
+    aboutText: siteContent.aboutText
+  }
+
+  logs.push(`Cập nhật nội dung trang: ${headerTitle}`)
+  save()
+  if(msg) msg.innerHTML = '<div class="p-3 rounded bg-green-100 text-green-700 text-sm">Lưu nội dung thành công!</div>'
+  setTimeout(()=>{
+    closeContentModal()
+  }, 900)
+}
+
 function openFlowerModal(){
   showFlowerModal = true
   showMemberModal = false
@@ -453,11 +679,13 @@ function saveFlowersOwned(){
 }
 
 
-function save(){
+async function save(){
   localStorage.setItem('members', JSON.stringify(members))
   localStorage.setItem('logs', JSON.stringify(logs))
   localStorage.setItem('topMembers', JSON.stringify(topMembers))
   localStorage.setItem('flowersOwned', JSON.stringify(flowersOwned))
+  localStorage.setItem('siteContent', JSON.stringify(siteContent))
+  await saveData()
   renderApp()
 }
 
@@ -470,7 +698,14 @@ function renderContent(){
   if(tab==='history') content.innerHTML = historyUI()
 }
 
-function logout(){
+async function logout(){
+  try {
+    if(useFirebase && auth){
+      await auth.signOut()
+    }
+  } catch(error){
+    console.error('Logout error', error)
+  }
   user = null
   renderLogin()
 }
